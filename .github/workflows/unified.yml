@@ -1,0 +1,202 @@
+name: Unified Multi-Account Workflow (Safe Commit Branches + PRs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_count:
+        description: 'Jumlah repository per akun'
+        default: 25
+      total_commits:
+        description: "Jumlah total commit per akun"
+        default: 1650
+      total_days:
+        description: "Jumlah hari pembagian commit"
+        default: 365
+      total_prs:
+        description: "Jumlah Pull Request per akun"
+        default: 120
+      total_issues:
+        description: "Jumlah Issue per akun"
+        default: 130
+      target_repo:
+        description: "Repository utama (contoh: username/activity-hub)"
+        default: "COUNTBACK/hapus"
+
+jobs:
+  unified:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - account: countback
+            email: 24824302+countback@users.noreply.github.com
+            token_secret: PAT1
+          - account: miyake0519
+            email: 31173253+miyake0519@users.noreply.github.com
+            token_secret: PAT2
+          - account: HanletVargas
+            email: 33170524+HanletVargas@users.noreply.github.com
+            token_secret: PAT3
+          - account: atytmr
+            email: 56760228+atytmr@users.noreply.github.com
+            token_secret: PAT4
+          - account: enzo071313
+            email: 60238329+enzo071313@users.noreply.github.com
+            token_secret: PAT5
+          - account: pabloprane1997
+            email: 72478529+pabloprane1997@users.noreply.github.com
+            token_secret: PAT6
+          - account: nicholasgama
+            email: 62399232+nicholasgama@users.noreply.github.com
+            token_secret: PAT7
+          - account: ViniMartinsz
+            email: 107067923+ViniMartinsz@users.noreply.github.com
+            token_secret: PAT8
+          - account: heyceo1
+            email: 130244920+heyceo1@users.noreply.github.com
+            token_secret: PAT9
+
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Delay before start
+        run: |
+          DELAY=$((10 + RANDOM % 25))
+          echo "🕒 Menunggu $DELAY detik sebelum memulai akun ${{ matrix.account }}..."
+          sleep $DELAY
+
+      - name: Clone target repo
+        env:
+          GH_TOKEN: ${{ secrets[matrix.token_secret] }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+        run: |
+          git clone https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO repo
+          cd repo
+          git config user.name "${{ matrix.account }}"
+          git config user.email "${{ matrix.email }}"
+          echo "✅ Git identity diatur untuk ${{ matrix.account }}"
+
+      - name: Generate commits in unique branch
+        env:
+          TOTAL_COMMITS: ${{ github.event.inputs.total_commits }}
+          TOTAL_DAYS: ${{ github.event.inputs.total_days }}
+          GH_TOKEN: ${{ secrets[matrix.token_secret] }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+        run: |
+          cd repo
+          mkdir -p logs
+          COMMITS_PER_DAY=$((TOTAL_COMMITS / TOTAL_DAYS))
+          START_DATE=$(date -d "$TOTAL_DAYS days ago" +%Y-%m-%d)
+          BRANCH="auto-${{ matrix.account }}-main"
+
+          echo "📊 Membuat $TOTAL_COMMITS commit selama $TOTAL_DAYS hari untuk branch $BRANCH..."
+
+          git checkout -B $BRANCH || git switch -c $BRANCH
+
+          for ((day=0; day<TOTAL_DAYS; day++)); do
+            DATE_STR=$(date -d "$START_DATE +$day days" +%Y-%m-%d)
+            for ((i=1; i<=COMMITS_PER_DAY; i++)); do
+              echo "Commit $i oleh ${{ matrix.account }} pada $DATE_STR" >> logs/${{ matrix.account }}_$day.txt
+              git add logs/${{ matrix.account }}_$day.txt
+              GIT_COMMITTER_DATE="$DATE_STR 12:00:00" \
+              GIT_AUTHOR_DATE="$DATE_STR 12:00:00" \
+              git commit -m "Auto commit $i by ${{ matrix.account }}" || true
+            done
+          done
+
+          echo "🚀 Push commit ke branch $BRANCH..."
+          for attempt in {1..3}; do
+            git push --force https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO HEAD:$BRANCH && break || sleep 3
+          done
+          echo "✅ Commits selesai dipush untuk ${{ matrix.account }}!"
+
+      - name: Create PR to main
+        env:
+          GH_TOKEN: ${{ secrets[matrix.token_secret] }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+        run: |
+          cd repo
+          BRANCH="auto-${{ matrix.account }}-main"
+          echo "🔀 Membuat Pull Request dari branch $BRANCH ke main..."
+          gh pr create \
+            --title "Auto PR dari ${{ matrix.account }}" \
+            --body "Pull request otomatis dari branch $BRANCH untuk menambahkan kontribusi commit." \
+            --base main --head $BRANCH \
+            --repo $TARGET_REPO || echo "⚠️ Gagal membuat PR, mungkin sudah ada."
+
+      - name: Create issues
+        env:
+          GH_TOKEN: ${{ secrets[matrix.token_secret] }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          TOTAL_ISSUES: ${{ github.event.inputs.total_issues }}
+        run: |
+          cd repo
+          echo "📋 Membuat $TOTAL_ISSUES issue..."
+          for i in $(seq 1 $TOTAL_ISSUES); do
+            gh issue create \
+              --title "Issue #$i dari ${{ matrix.account }}" \
+              --body "Auto-generated issue #$i oleh ${{ matrix.account }}" \
+              --repo $TARGET_REPO || true
+            sleep 1
+          done
+
+      - name: Auto Create Repositories
+        env:
+          PAT_TOKEN: ${{ secrets[matrix.token_secret] }}
+        run: |
+          set -euo pipefail
+          WORDS=("quantum" "nova" "lumen" "matrix" "orbit" "vector" "sigma" "neon" "delta" "aero" "fusion" "zenith")
+          SUFFIX=("project" "service" "system" "app" "engine" "hub" "core" "cloud" "framework")
+          LANGS=("Python" "C++" "Go" "Swift" "Java" "JavaScript" "Ruby")
+          EXT=("py" "cpp" "go" "swift" "java" "js" "rb")
+          CONTENTS=(
+            "print('Hello from Python!')"
+            "#include <iostream>\nint main(){std::cout << \"Hello from C++!\"; return 0;}"
+            "package main\nimport \"fmt\"\nfunc main(){fmt.Println(\"Hello from Go!\")}"
+            "print(\"Hello from Swift!\")"
+            "public class Main { public static void main(String[] args){ System.out.println(\"Hello from Java!\"); } }"
+            "console.log('Hello from JavaScript!');"
+            "puts 'Hello from Ruby!'"
+          )
+
+          COUNT=${{ github.event.inputs.repo_count }}
+          git config --global user.name "${{ matrix.account }}"
+          git config --global user.email "${{ matrix.email }}"
+
+          echo "=== [${{ matrix.account }}] Membuat $COUNT repositori ==="
+
+          for i in $(seq 1 $COUNT); do
+            NAME="${WORDS[$RANDOM % ${#WORDS[@]}]}-${SUFFIX[$RANDOM % ${#SUFFIX[@]}]}"
+            LANG_INDEX=$((RANDOM % ${#LANGS[@]}))
+            LANG=${LANGS[$LANG_INDEX]}
+            FILE_EXT=${EXT[$LANG_INDEX]}
+            FILE_CONTENT=${CONTENTS[$LANG_INDEX]}
+            FILE_NAME="main.${FILE_EXT}"
+
+            echo "📦 [$i/$COUNT] Membuat repo: $NAME ($LANG)"
+            response=$(curl -s -H "Authorization: token $PAT_TOKEN" \
+              -d "{\"name\":\"$NAME\",\"auto_init\":true}" \
+              https://api.github.com/user/repos)
+
+            if echo "$response" | grep -q '"full_name"'; then
+              echo "✅ Repository berhasil dibuat: $NAME"
+            else
+              echo "⚠️ Gagal membuat repository $NAME"
+              continue
+            fi
+
+            sleep 2
+            git clone https://x-access-token:${PAT_TOKEN}@github.com/${{ matrix.account }}/$NAME.git
+            cd $NAME
+            printf "%b\n" "$FILE_CONTENT" > $FILE_NAME
+            git add .
+            git commit -m "Initial commit ($LANG)"
+            git push origin main --force
+            cd ..
+            rm -rf $NAME
+          done
+          echo "✅ Semua repo selesai dibuat!"
